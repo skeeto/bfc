@@ -20,7 +20,7 @@ int pass_comments = 0;
 char *bfstr_type = "unsigned char";
 char *bfstr_ptr = "ptr";
 char *bfstr_buffer = "bf_buffer";
-char *bfstr_get = "*%s = (%s) getchar ();\n";
+char *bfstr_get = "*%s = (BFTYPE) getchar ();\n";
 char *bfstr_put = "putchar ((char) *%s);\n";
 char *bfstr_loop = "while (*%s) {\n";
 char *bfstr_end = "}\n";
@@ -120,16 +120,19 @@ void print_head ()
   if (bfbignum)
     fprintf (bfout, "#include <gmp.h>\n");
   fprintf (bfout, "\n");
-
+  
+  /* Type define */
+  fprintf (bfout, "#define BFTYPE %s\n\n", bfstr_type);
+  
   /* Main memory */
   char *bfinit = " = { 0 }";
   if (bfbignum)
     bfinit = "";
   if (dynamic_mem)
-    fprintf (bfout, "  %s *%s;\n\n", bfstr_type, bfstr_buffer);
+    fprintf (bfout, "BFTYPE *%s;\n\n", bfstr_buffer);
   else
-    fprintf (bfout, "%s %s[%d]%s;\n\n",
-	     bfstr_type, bfstr_buffer, mem_size, bfinit);
+    fprintf (bfout, "BFTYPE %s[%d]%s;\n\n",
+	     bfstr_buffer, mem_size, bfinit);
 
   /* Track buffer size */
   if (dynamic_mem || check_bounds || dump_core)
@@ -150,7 +153,7 @@ void print_head ()
   if (dump_core)
     {
       fprintf (bfout, "/* Dump the memory core */\n");
-      fprintf (bfout, "void dump_core (%s *buff, int n) {\n", bfstr_type);
+      fprintf (bfout, "void dump_core (BFTYPE *buff, int n) {\n");
       fprintf (bfout, "  FILE *fp = fopen (\"bf-core\", \"w\");\n");
       fprintf (bfout, "  if (fp == NULL)\n");
       fprintf (bfout, "    return;\n\n");
@@ -183,16 +186,16 @@ void print_head ()
     {
       /* Print memory resize function */
       fprintf (bfout, "/* Resize memory */\n");
-      fprintf (bfout, "%s *bf_buffinc (%s *buff, %s **ptr) {\n",
-	       bfstr_type, bfstr_type, bfstr_type);
+      fprintf (bfout, "BFTYPE *bf_buffinc (%s *buff, %s **ptr) {\n",
+	       bfstr_type, bfstr_type);
       fprintf (bfout, "  int offset = *ptr - buff;\n");
       fprintf (bfout, "  int old_bsize = %s;\n", bfstr_bsize);
       fprintf (bfout, "  %s *= %d;\n", bfstr_bsize, mem_grow_rate);
       fprintf (bfout, "  if (offset > %s)\n", bfstr_bsize);
       fprintf (bfout, "    %s = offset;\n\n", bfstr_bsize);
 
-      fprintf (bfout, "  buff = (%s *) realloc ((void *) buff, "
-	       "%s * sizeof (%s));\n", bfstr_type, bfstr_bsize, bfstr_type);
+      fprintf (bfout, "  buff = (BFTYPE *) realloc ((void *) buff, "
+	       "%s * sizeof (BFTYPE));\n", bfstr_bsize);
       fprintf (bfout, "  if (!buff) {\n");
       fprintf (bfout, "    fprintf (stderr, \"%s:%d:%s\\n\");\n",
 	       bfstr_name, lineno, bfstr_memerr);
@@ -202,8 +205,8 @@ void print_head ()
       if (!bfbignum)
 	{
 	  fprintf (bfout, "  memset ((buff + old_bsize), 0, "
-		   "(%s - old_bsize) * sizeof (%s));\n",
-		   bfstr_bsize, bfstr_type);
+		   "(%s - old_bsize) * sizeof (BFTYPE));\n",
+		   bfstr_bsize);
 	}
       else
 	{
@@ -216,17 +219,17 @@ void print_head ()
 
       /* main */
       fprintf (bfout, "int main () {\n");
-      fprintf (bfout, "  %s = malloc (%d * sizeof (%s));\n\n",
-	       bfstr_buffer, mem_size, bfstr_type);
-      fprintf (bfout, "  %s *%s = %s;\n\n",
-	       bfstr_type, bfstr_ptr, bfstr_buffer);
+      fprintf (bfout, "  %s = malloc (%d * sizeof (BFTYPE));\n\n",
+	       bfstr_buffer, mem_size);
+      fprintf (bfout, "  BFTYPE *%s = %s;\n\n",
+	       bfstr_ptr, bfstr_buffer);
     }
   else
     {
       /* main */
       fprintf (bfout, "int main () {\n");
-      fprintf (bfout, "  %s *%s = %s;\n\n",
-	       bfstr_type, bfstr_ptr, bfstr_buffer);
+      fprintf (bfout, "  BFTYPE *%s = %s;\n\n",
+	       bfstr_ptr, bfstr_buffer);
     }
 
   if (bfbignum)
@@ -342,7 +345,7 @@ void print_move (char c, int n)
 void print_input ()
 {
   print_indent ();
-  fprintf (bfout, bfstr_get, bfstr_ptr, bfstr_type);
+  fprintf (bfout, bfstr_get, bfstr_ptr);
 }
 
 /* Print output code */
