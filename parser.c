@@ -308,6 +308,7 @@ inst_t *loop_add_opt (inst_t * loopinst)
 		  newinst.ret = loopinst->ret->ret;
 		  newinst.dst = bal;
 		  newinst.src = 0;
+		  lineno = ii->lineno;
 		  tail->next = im_create (&newinst);
 		  tail = tail->next;
 		}

@@ -466,7 +466,7 @@ void print_head ()
 
       /* main */
       fprintf (bfout, "int main () {\n");
-      fprintf (bfout, "  %s = malloc (%s * sizeof (BFTYPE));\n\n",
+      fprintf (bfout, "  %s = calloc (%s * sizeof (BFTYPE), 1);\n\n",
 	       bfstr_buffer, bfstr_bsize);
       if (!bfthreads)
 	fprintf (bfout, "  BFTYPE *%s = %s;\n\n", bfstr_ptr, bfstr_buffer);
@@ -695,6 +695,65 @@ void print_ccpy (int dst, int src)
 	fprintf (bfout, "  pthread_mutex_lock (&mem_lock);\n");
       else
 	fprintf (bfout, "  pthread_mutex_lock (&ptr->lock);\n");
+    }
+
+  if (check_bounds)
+    {
+      /* Check lower bounds */
+      if (dst < 0)
+	{
+	  print_indent ();
+	  fprintf (bfout, "if (%s + %d < %s) {\n",
+		   bfstr_ptr, dst, bfstr_buffer);
+	  print_indent ();
+	  fprintf (bfout, "  fprintf (stderr, \"%s:%d:%s\\n\");\n",
+		   bfstr_name, lineno, bfstr_bounderr);
+	  print_indent ();
+	  fprintf (bfout, "  abort ();");
+	  print_indent ();
+	  fprintf (bfout, "}");
+	}
+      if (src < 0)
+	{
+	  print_indent ();
+	  fprintf (bfout, "if (%s + %d < %s) {\n",
+		   bfstr_ptr, src, bfstr_buffer);
+	  print_indent ();
+	  fprintf (bfout, "  fprintf (stderr, \"%s:%d:%s\\n\");\n",
+		   bfstr_name, lineno, bfstr_bounderr);
+	  print_indent ();
+	  fprintf (bfout, "  abort ();");
+	  print_indent ();
+	  fprintf (bfout, "}");
+	}
+
+      /* Check upper bounds */
+      if (dst > 0)
+	{
+	  print_indent ();
+	  fprintf (bfout, "if (%s + %d > %s) {\n",
+		   bfstr_ptr, dst, bfstr_buffer);
+	  print_indent ();
+	  fprintf (bfout, "  fprintf (stderr, \"%s:%d:%s\\n\");\n",
+		   bfstr_name, lineno, bfstr_bounderr);
+	  print_indent ();
+	  fprintf (bfout, "  abort ();");
+	  print_indent ();
+	  fprintf (bfout, "}");
+	}
+      if (src > 0)
+	{
+	  print_indent ();
+	  fprintf (bfout, "if (%s + %d > %s) {\n",
+		   bfstr_ptr, src, bfstr_buffer);
+	  print_indent ();
+	  fprintf (bfout, "  fprintf (stderr, \"%s:%d:%s\\n\");\n",
+		   bfstr_name, lineno, bfstr_bounderr);
+	  print_indent ();
+	  fprintf (bfout, "  abort ();");
+	  print_indent ();
+	  fprintf (bfout, "}");
+	}
     }
 
   if (!bfbignum)
