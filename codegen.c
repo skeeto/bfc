@@ -660,11 +660,11 @@ void print_loop ()
 {
   print_indent ();
   if (bfbignum && !bfthreads)
-    fprintf (bfout, bfstr_loop, bfstr_ptr);
+    fprintf (bfout, bfstr_loop, bfstr_ptr, bfstr_ptr);
   else if (bfthreads)
     fprintf (bfout, "while (cell_cond (ptri)) {\n");
   else
-    fprintf (bfout, bfstr_loop, bfstr_ptr, bfstr_ptr);
+    fprintf (bfout, bfstr_loop, bfstr_ptr);
 
   indent++;
 }
