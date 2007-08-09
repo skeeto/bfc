@@ -21,6 +21,7 @@ extern int indent;		/* Indentation level */
 
 /* Code strings */
 extern char *bfstr_type;	/* Cell type */
+extern char *bfstr_htype;	/* Thread type */
 extern char *bfstr_ptr;		/* Cell pointer name */
 extern char *bfstr_buffer;	/* Buffer name */
 extern char *bfstr_get;		/* C code for . */
@@ -46,5 +47,6 @@ extern int bfbignum;		/* Bignum mode */
 extern int optimize_c;		/* Run compiler optimizer */
 extern int optimize;		/* Run optimization */
 extern int pass_comments;	/* Pass comments to output */
+extern int bfthreads;		/* Enable threading. */
 
 #endif

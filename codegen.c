@@ -15,9 +15,11 @@ int bfbignum = 0;
 int optimize_c = 0;
 int optimize = 1;
 int pass_comments = 0;
+int bfthreads = 0;
 
 /* Code strings */
 char *bfstr_type = "unsigned char";
+char *bfstr_htype = NULL;
 char *bfstr_ptr = "ptr";
 char *bfstr_buffer = "bf_buffer";
 char *bfstr_get = "*%s = (BFTYPE) getchar ();\n";
@@ -35,6 +37,15 @@ int indent = 1;
 /* Walk through intermediate tree and generate code. */
 void im_codegen (inst_t * head)
 {
+  /* Handle threads */
+  static int thread_cnt = 0;
+  if (bfthreads)
+    {
+      fprintf (bfout, "void *bf%d (void *x) {\n", thread_cnt);
+      fprintf (bfout, "  int ptri = %d;\n\n", thread_cnt);
+      thread_cnt++;
+    }
+
   indent = 1;
 
   int returned = 0;
@@ -107,6 +118,13 @@ void im_codegen (inst_t * head)
       else
 	inst = NULL;
     }
+
+  if (bfthreads)
+    {
+      fprintf (bfout, "\n");
+      fprintf (bfout, "  pthread_exit (NULL);\n");
+      fprintf (bfout, "} /* thread %d */\n\n", thread_cnt - 1);
+    }
 }
 
 /* Print the top of the C file */
@@ -119,11 +137,28 @@ void print_head ()
     fprintf (bfout, "#include <signal.h>\n");
   if (bfbignum)
     fprintf (bfout, "#include <gmp.h>\n");
+  if (bfthreads)
+    fprintf (bfout, "#include <pthread.h>\n");
   fprintf (bfout, "\n");
-  
+
   /* Type define */
   fprintf (bfout, "#define BFTYPE %s\n\n", bfstr_type);
-  
+
+  /* Thread struct */
+  if (bfthreads)
+    {
+      fprintf (bfout, "typedef struct BFTYPE {\n");
+      fprintf (bfout, "  %s val;\n", bfstr_htype);
+      fprintf (bfout, "  pthread_mutex_t lock;\n");
+      fprintf (bfout, "} BFTYPE;\n\n");
+      fprintf (bfout, "BFTYPE *hptr[%d]; /* Thread pointers */\n\n",
+	       bfthreads);
+    }
+
+  /* resize prototype */
+  if (dynamic_mem)
+    fprintf (bfout, "void bf_buffinc (BFTYPE **ptr);\n\n");
+
   /* Main memory */
   char *bfinit = " = { 0 }";
   if (bfbignum)
@@ -131,8 +166,9 @@ void print_head ()
   if (dynamic_mem)
     fprintf (bfout, "BFTYPE *%s;\n\n", bfstr_buffer);
   else
-    fprintf (bfout, "BFTYPE %s[%d]%s;\n\n",
-	     bfstr_buffer, mem_size, bfinit);
+    fprintf (bfout, "BFTYPE %s[%d]%s;\n\n", bfstr_buffer, mem_size, bfinit);
+  if (bfthreads && dynamic_mem)
+    fprintf (bfout, "pthread_mutex_t mem_lock;\n\n");
 
   /* Track buffer size */
   if (dynamic_mem || check_bounds || dump_core)
@@ -142,35 +178,227 @@ void print_head ()
   /* bignum init */
   if (bfbignum)
     {
-      fprintf (bfout, "void bignum_init (mpz_t *buff, int n) {\n");
+      char *thread_str;
+      if (bfthreads)
+	thread_str = ".val";
+      else
+	thread_str = "";
+      fprintf (bfout, "/* Initialize bignum values */\n");
+      fprintf (bfout, "void bignum_init (BFTYPE *buff, int n) {\n");
       fprintf (bfout, "  int i;\n");
       fprintf (bfout, "  for (i = 0; i < n; i++)\n");
-      fprintf (bfout, "    mpz_init (buff[i]);\n");
+      fprintf (bfout, "    mpz_init (buff[i]%s);\n", thread_str);
       fprintf (bfout, "}\n\n");
     }
 
-  /* bignum init */
+  /* mutex */
+  if (bfthreads)
+    {
+      /* init */
+      fprintf (bfout, "/* Initialize mutex locks */\n");
+      fprintf (bfout, "void mutex_init (BFTYPE *buff, int n) {\n");
+      fprintf (bfout, "  int i;\n");
+      fprintf (bfout, "  for (i = 0; i < n; i++) {\n");
+      fprintf (bfout, "    pthread_mutex_init (&buff[i].lock, NULL);\n");
+      if (bfbignum)
+	fprintf (bfout, "    mpz_init (buff[i].val);\n");
+      else
+	fprintf (bfout, "    buff[i].val = 0;\n");
+      fprintf (bfout, "  }\n");
+      fprintf (bfout, "}\n\n");
+
+      /* inc */
+      fprintf (bfout, "void cell_inc (int i, int n) {\n");
+      if (dynamic_mem)
+	{
+	  fprintf (bfout, "  pthread_mutex_lock (&mem_lock);\n");
+	  fprintf (bfout, "  BFTYPE *ptr = hptr[i];\n");
+	}
+      else
+	{
+	  fprintf (bfout, "  BFTYPE *ptr = hptr[i];\n");
+	  fprintf (bfout, "  pthread_mutex_lock (&ptr->lock);\n");
+	}
+      if (bfbignum)
+	{
+	  fprintf (bfout, "  mpz_add_ui (ptr->val, ptr->val, n);\n");
+	}
+      else
+	{
+	  fprintf (bfout, "  ptr->val += n;\n");
+	}
+      if (dynamic_mem)
+	fprintf (bfout, "  pthread_mutex_unlock (&mem_lock);\n");
+      else
+	fprintf (bfout, "  pthread_mutex_unlock (&ptr->lock);\n");
+      fprintf (bfout, "}\n\n");
+
+      /* dec */
+      fprintf (bfout, "void cell_dec (int i, int n) {\n");
+      if (dynamic_mem)
+	{
+	  fprintf (bfout, "  pthread_mutex_lock (&mem_lock);\n");
+	  fprintf (bfout, "  BFTYPE *ptr = hptr[i];\n");
+	}
+      else
+	{
+	  fprintf (bfout, "  BFTYPE *ptr = hptr[i];\n");
+	  fprintf (bfout, "  pthread_mutex_lock (&ptr->lock);\n");
+	}
+      if (bfbignum)
+	{
+	  fprintf (bfout, "  mpz_sub_ui (ptr->val, ptr->val, n);\n");
+	}
+      else
+	{
+	  fprintf (bfout, "  ptr->val -= n;\n");
+	}
+      if (dynamic_mem)
+	fprintf (bfout, "  pthread_mutex_unlock (&mem_lock);\n");
+      else
+	fprintf (bfout, "  pthread_mutex_unlock (&ptr->lock);\n");
+      fprintf (bfout, "}\n\n");
+
+      /* get conditional */
+      fprintf (bfout, "int cell_cond (int i) {\n");
+      if (dynamic_mem)
+	{
+	  fprintf (bfout, "  pthread_mutex_lock (&mem_lock);\n");
+	  fprintf (bfout, "  BFTYPE *ptr = hptr[i];\n");
+	}
+      else
+	{
+	  fprintf (bfout, "  BFTYPE *ptr = hptr[i];\n");
+	  fprintf (bfout, "  pthread_mutex_lock (&ptr->lock);\n");
+	}
+      if (bfbignum)
+	{
+	  fprintf (bfout, "  int out = !mpz_fits_sint_p (ptr->val) ||"
+		   " mpz_get_ui (ptr->val) != 0;\n");
+	}
+      else
+	{
+	  fprintf (bfout, "  int out = ptr->val;\n");
+	}
+      if (dynamic_mem)
+	fprintf (bfout, "  pthread_mutex_unlock (&mem_lock);\n");
+      else
+	fprintf (bfout, "  pthread_mutex_unlock (&ptr->lock);\n");
+      fprintf (bfout, "  return out;\n");
+      fprintf (bfout, "}\n\n");
+
+      /* get */
+      fprintf (bfout, "char cell_get (int i) {\n");
+      if (dynamic_mem)
+	{
+	  fprintf (bfout, "  pthread_mutex_lock (&mem_lock);\n");
+	  fprintf (bfout, "  BFTYPE *ptr = hptr[i];\n");
+	}
+      else
+	{
+	  fprintf (bfout, "  BFTYPE *ptr = hptr[i];\n");
+	  fprintf (bfout, "  pthread_mutex_lock (&ptr->lock);\n");
+	}
+      if (bfbignum)
+	fprintf (bfout, "  char out = (char) mpz_get_ui (ptr->val);\n");
+      else
+	fprintf (bfout, "  char out = (char) ptr->val;\n");
+      if (dynamic_mem)
+	fprintf (bfout, "  pthread_mutex_unlock (&mem_lock);\n");
+      else
+	fprintf (bfout, "  pthread_mutex_unlock (&ptr->lock);\n");
+      fprintf (bfout, "  return out;\n");
+      fprintf (bfout, "}\n\n");
+
+      /* set */
+      fprintf (bfout, "void cell_set (int i, char in) {\n");
+      if (dynamic_mem)
+	{
+	  fprintf (bfout, "  pthread_mutex_lock (&mem_lock);\n");
+	  fprintf (bfout, "  BFTYPE *ptr = hptr[i];\n");
+	}
+      else
+	{
+	  fprintf (bfout, "  BFTYPE *ptr = hptr[i];\n");
+	  fprintf (bfout, "  pthread_mutex_lock (&ptr->lock);\n");
+	}
+      if (bfbignum)
+	fprintf (bfout, "  mpz_set_ui "
+		 "(ptr->val, (unsigned long int) in);\n");
+      else
+	fprintf (bfout, "  ptr->val = in;\n");
+      if (dynamic_mem)
+	fprintf (bfout, "  pthread_mutex_unlock (&mem_lock);\n");
+      else
+	fprintf (bfout, "  pthread_mutex_unlock (&ptr->lock);\n");
+      fprintf (bfout, "}\n\n");
+
+      /* move */
+      fprintf (bfout, "void cell_move (int i, int m) {\n");
+      if (dynamic_mem)
+	{
+	  fprintf (bfout, "  pthread_mutex_lock (&mem_lock);\n");
+	  fprintf (bfout, "  BFTYPE *ptr = hptr[i];\n");
+	}
+      else
+	{
+	  fprintf (bfout, "  BFTYPE *ptr = hptr[i];\n");
+	  fprintf (bfout, "  pthread_mutex_lock (&ptr->lock);\n");
+	}
+      fprintf (bfout, "  hptr[i] += m;\n");
+      fprintf (bfout, "  int oob = hptr[i] - %s >= %s;\n",
+	       bfstr_buffer, bfstr_bsize);
+      if (dynamic_mem)
+	fprintf (bfout, "  pthread_mutex_unlock (&mem_lock);\n");
+      else
+	fprintf (bfout, "  pthread_mutex_unlock (&ptr->lock);\n");
+      fprintf (bfout, "  if (oob)\n");
+      fprintf (bfout, "    bf_buffinc (&%s);\n", bfstr_ptr);
+      fprintf (bfout, "}\n\n");
+
+    }
+
+  /* Thread function prototypes */
+  if (bfthreads)
+    {
+      fprintf (bfout, "/* Thread functions */\n");
+      int i;
+      for (i = 0; i < bfthreads; i++)
+	fprintf (bfout, "void *bf%d (void *);\n", i);
+      fprintf (bfout, "\n");
+    }
+
+  /* core dumps */
   if (dump_core)
     {
+      char *thread_str;
+      if (bfthreads)
+	thread_str = ".val";
+      else
+	thread_str = "";
+
       fprintf (bfout, "/* Dump the memory core */\n");
       fprintf (bfout, "void dump_core (BFTYPE *buff, int n) {\n");
       fprintf (bfout, "  FILE *fp = fopen (\"bf-core\", \"w\");\n");
       fprintf (bfout, "  if (fp == NULL)\n");
       fprintf (bfout, "    return;\n\n");
       fprintf (bfout, "  int i;\n");
-      if (!bfbignum)
-	{
-	  fprintf (bfout, "  for (i = 0; i < n; i++)\n");
-	  fprintf (bfout, "    fprintf (fp, \"%%d\\n\", (int) buff[i]);\n\n");
-	}
-      else
+      if (bfbignum)
 	{
 	  fprintf (bfout, "  char *numstr;\n");
 	  fprintf (bfout, "  for (i = 0; i < n; i++) {\n");
-	  fprintf (bfout, "    numstr = mpz_get_str(NULL, 10, buff[i]);\n");
+	  fprintf (bfout, "    numstr = mpz_get_str(NULL, 10, buff[i]%s);\n",
+		   thread_str);
 	  fprintf (bfout, "    fprintf (fp, \"%%s\\n\", numstr);\n");
 	  fprintf (bfout, "    free (numstr);\n");
 	  fprintf (bfout, "  }\n");
+	}
+      else
+	{
+	  fprintf (bfout, "  for (i = 0; i < n; i++)\n");
+	  fprintf (bfout,
+		   "    fprintf (fp, \"%%d\\n\", (int) buff[i]%s);\n\n",
+		   thread_str);
 	}
       fprintf (bfout, "  fclose (fp);");
       fprintf (bfout, "}\n\n");
@@ -186,59 +414,109 @@ void print_head ()
     {
       /* Print memory resize function */
       fprintf (bfout, "/* Resize memory */\n");
-      fprintf (bfout, "BFTYPE *bf_buffinc (%s *buff, %s **ptr) {\n",
-	       bfstr_type, bfstr_type);
-      fprintf (bfout, "  int offset = *ptr - buff;\n");
+      fprintf (bfout, "void bf_buffinc (BFTYPE **ptr) {\n");
+      if (bfthreads)
+	{
+	  fprintf (bfout, "  pthread_mutex_lock (&mem_lock);\n");
+	  fprintf (bfout, "  int offsets[%d];\n", bfthreads);
+	  int i;
+	  for (i = 0; i < bfthreads; i++)
+	    fprintf (bfout, "  offsets[%d] = hptr[%d] - %s;\n",
+		     i, i, bfstr_buffer);
+	}
+      fprintf (bfout, "  int offset = *ptr - %s;\n\n", bfstr_buffer);
       fprintf (bfout, "  int old_bsize = %s;\n", bfstr_bsize);
       fprintf (bfout, "  %s *= %d;\n", bfstr_bsize, mem_grow_rate);
       fprintf (bfout, "  if (offset > %s)\n", bfstr_bsize);
       fprintf (bfout, "    %s = offset;\n\n", bfstr_bsize);
 
-      fprintf (bfout, "  buff = (BFTYPE *) realloc ((void *) buff, "
-	       "%s * sizeof (BFTYPE));\n", bfstr_bsize);
-      fprintf (bfout, "  if (!buff) {\n");
+      fprintf (bfout, "  %s = (BFTYPE *) realloc ((void *) %s, "
+	       "%s * sizeof (BFTYPE));\n",
+	       bfstr_buffer, bfstr_buffer, bfstr_bsize);
+      fprintf (bfout, "  if (!%s) {\n", bfstr_buffer);
       fprintf (bfout, "    fprintf (stderr, \"%s:%d:%s\\n\");\n",
 	       bfstr_name, lineno, bfstr_memerr);
       fprintf (bfout, "    abort ();\n  }\n\n");
 
       /* clear */
-      if (!bfbignum)
+      if (bfbignum && !bfthreads)
 	{
-	  fprintf (bfout, "  memset ((buff + old_bsize), 0, "
-		   "(%s - old_bsize) * sizeof (BFTYPE));\n",
-		   bfstr_bsize);
+	  fprintf (bfout, "  bignum_init ((%s + old_bsize), "
+		   "%s - old_bsize);\n", bfstr_buffer, bfstr_bsize);
+	  fprintf (bfout, "  *ptr = %s + offset;\n", bfstr_buffer);
+	}
+      else if (bfthreads)
+	{
+	  fprintf (bfout, "  mutex_init ((%s + old_bsize), "
+		   "%s - old_bsize);\n", bfstr_buffer, bfstr_bsize);
+	  int i;
+	  for (i = 0; i < bfthreads; i++)
+	    fprintf (bfout, "  hptr[%d] = %s + offsets[%d];\n",
+		     i, bfstr_buffer, i);
+	  fprintf (bfout, "  pthread_mutex_unlock (&mem_lock);\n");
 	}
       else
 	{
-	  fprintf (bfout, "  bignum_init ((buff + old_bsize), "
-		   "%s - old_bsize);\n", bfstr_bsize);
+	  fprintf (bfout, "  memset ((%s + old_bsize), 0, "
+		   "(%s - old_bsize) * sizeof (BFTYPE));\n",
+		   bfstr_buffer, bfstr_bsize);
+	  fprintf (bfout, "  *ptr = %s + offset;\n", bfstr_buffer);
 	}
-
-      fprintf (bfout, "  *ptr = buff + offset;\n");
-      fprintf (bfout, "  return buff;\n}\n\n");
+      fprintf (bfout, "}\n\n");
 
       /* main */
       fprintf (bfout, "int main () {\n");
-      fprintf (bfout, "  %s = malloc (%d * sizeof (BFTYPE));\n\n",
-	       bfstr_buffer, mem_size);
-      fprintf (bfout, "  BFTYPE *%s = %s;\n\n",
-	       bfstr_ptr, bfstr_buffer);
+      fprintf (bfout, "  %s = malloc (%s * sizeof (BFTYPE));\n\n",
+	       bfstr_buffer, bfstr_bsize);
+      if (!bfthreads)
+	fprintf (bfout, "  BFTYPE *%s = %s;\n\n", bfstr_ptr, bfstr_buffer);
     }
   else
     {
       /* main */
       fprintf (bfout, "int main () {\n");
-      fprintf (bfout, "  BFTYPE *%s = %s;\n\n",
-	       bfstr_ptr, bfstr_buffer);
+      if (!bfthreads)
+	fprintf (bfout, "  BFTYPE *%s = %s;\n\n", bfstr_ptr, bfstr_buffer);
     }
 
-  if (bfbignum)
+  if (bfbignum && !bfthreads)
     {
       fprintf (bfout, "  bignum_init (%s, %d);\n\n", bfstr_buffer, mem_size);
     }
 
   if (dump_core)
     fprintf (bfout, "  signal (SIGINT, int_handle);\n\n");
+
+  /* Spawn threads. */
+  if (bfthreads)
+    {
+      if (dynamic_mem)
+	fprintf (bfout, "  pthread_mutex_init (&mem_lock, NULL);\n");
+      else
+	fprintf (bfout, "  mutex_init (%s, %d);\n\n", bfstr_buffer, mem_size);
+
+      /* Initialize pointers */
+      int i;
+      for (i = 0; i < bfthreads; i++)
+	fprintf (bfout, "  hptr[%d] = %s;\n", i, bfstr_buffer);
+      fprintf (bfout, "\n");
+
+
+      /* Create */
+      fprintf (bfout, "  pthread_t bfthread[%d];\n", bfthreads);
+      for (i = 0; i < bfthreads; i++)
+	fprintf (bfout, "  pthread_create "
+		 "(&bfthread[%d], NULL, bf%d, NULL);\n", i, i);
+      fprintf (bfout, "\n");
+
+      /* Join */
+      for (i = 0; i < bfthreads; i++)
+	fprintf (bfout, "  pthread_join " "(bfthread[%d], NULL);\n", i);
+      fprintf (bfout, "\n");
+
+      print_tail ();
+      fprintf (bfout, "\n");
+    }
 }
 
 /* Print the bottom of the C file */
@@ -262,6 +540,16 @@ void print_tail ()
 /* Print increment instruction(s) */
 void print_incdec (char c, int n)
 {
+  if (bfthreads)
+    {
+      print_indent ();
+      if (c == '+')
+	fprintf (bfout, "cell_inc (ptri, %d);\n", n);
+      else
+	fprintf (bfout, "cell_dec (ptri, %d);\n", n);
+      return;
+    }
+
   if (bfbignum)
     {
       char *addsub;
@@ -289,6 +577,13 @@ void print_move (char c, int n)
   else
     c = '-';
 
+  if (bfthreads)
+    {
+      print_indent ();
+      fprintf (bfout, "cell_move (ptri, %c%d);\n", c, n);
+      return;
+    }
+
   if (dynamic_mem)
     {
       print_indent ();
@@ -301,8 +596,7 @@ void print_move (char c, int n)
 	  fprintf (bfout, "if (%s - %s >= %s)\n",
 		   bfstr_ptr, bfstr_buffer, bfstr_bsize);
 	  print_indent ();
-	  fprintf (bfout, "  %s = bf_buffinc (%s, &%s);\n",
-		   bfstr_buffer, bfstr_buffer, bfstr_ptr);
+	  fprintf (bfout, "  bf_buffinc (&%s);\n", bfstr_ptr);
 	}
     }
   else
@@ -345,24 +639,33 @@ void print_move (char c, int n)
 void print_input ()
 {
   print_indent ();
-  fprintf (bfout, bfstr_get, bfstr_ptr);
+  if (!bfthreads)
+    fprintf (bfout, bfstr_get, bfstr_ptr);
+  else
+    fprintf (bfout, "cell_set (ptri, getchar ());\n");
 }
 
 /* Print output code */
 void print_output ()
 {
   print_indent ();
-  fprintf (bfout, bfstr_put, bfstr_ptr);
+  if (!bfthreads)
+    fprintf (bfout, bfstr_put, bfstr_ptr);
+  else
+    fprintf (bfout, "putchar (cell_get (ptri));\n");
 }
 
 /* Print loop beginning */
 void print_loop ()
 {
   print_indent ();
-  if (!bfbignum)
+  if (bfbignum && !bfthreads)
     fprintf (bfout, bfstr_loop, bfstr_ptr);
+  else if (bfthreads)
+    fprintf (bfout, "while (cell_cond (ptri)) {\n");
   else
     fprintf (bfout, bfstr_loop, bfstr_ptr, bfstr_ptr);
+
   indent++;
 }
 
@@ -386,6 +689,14 @@ void print_indent ()
 
 void print_ccpy (int dst, int src)
 {
+  if (bfthreads)
+    {
+      if (dynamic_mem)
+	fprintf (bfout, "  pthread_mutex_lock (&mem_lock);\n");
+      else
+	fprintf (bfout, "  pthread_mutex_lock (&ptr->lock);\n");
+    }
+
   if (!bfbignum)
     {
       print_indent ();
@@ -398,18 +709,23 @@ void print_ccpy (int dst, int src)
       fprintf (bfout, "mpz_add (*(%s + %d), *(%s + %d), *(%s + %d));\n",
 	       bfstr_ptr, dst, bfstr_ptr, dst, bfstr_ptr, src);
     }
+
+  if (bfthreads)
+    {
+      if (dynamic_mem)
+	fprintf (bfout, "  pthread_mutex_unlock (&mem_lock);\n");
+      else
+	fprintf (bfout, "  pthread_mutex_unlock (&ptr->lock);\n");
+    }
 }
 
 void print_cclr ()
 {
-  if (!bfbignum)
-    {
-      print_indent ();
-      fprintf (bfout, "*%s = 0;\n", bfstr_ptr);
-    }
+  print_indent ();
+  if (bfbignum && !bfthreads)
+    fprintf (bfout, "mpz_set_ui (*%s, 0);\n", bfstr_ptr);
+  else if (bfthreads)
+    fprintf (bfout, "cell_set (ptri, 0);\n");
   else
-    {
-      print_indent ();
-      fprintf (bfout, "mpz_set_ui (*%s, 0);\n", bfstr_ptr);
-    }
+    fprintf (bfout, "*%s = 0;\n", bfstr_ptr);
 }

@@ -46,6 +46,7 @@ void print_usage (int exit_stat)
   printf ("  -O, --optimize        Optimize compiled code (C compiler)\n");
   printf ("  -d, --dump            Dump memory core after run\n");
   printf ("  -C, --comments        Pass comments back out\n");
+  printf ("  -H, --threads         Each supplied program gets a thread\n");
 #ifdef EN_COMPILE
   printf ("  -c, --compile         Send output to C compiler\n");
 #endif
@@ -80,6 +81,7 @@ int main (int argc, char **argv)
 	{"output",        required_argument, 0, 'o'},
 	{"optimize",      no_argument,       0, 'O'},
 	{"no-optimize",   no_argument,       0, 'n'},
+	{"threads",       no_argument,       0, 'H'},
 	{"comments",      no_argument,       0, 'C'},
 #ifdef EN_COMPILE
 	{"compile",       no_argument,       0, 'c'},
@@ -94,7 +96,7 @@ int main (int argc, char **argv)
       /* getopt_long stores the option index here. */
       int option_index = 0;
       char c;
-      c = getopt_long (argc, argv, "sbm:g:t:o:OncCdVh",
+      c = getopt_long (argc, argv, "sbm:g:t:o:OHncCdVh",
 		       long_options, &option_index);
 
       /* Detect the end of the options. */
@@ -113,6 +115,10 @@ int main (int argc, char **argv)
 
 	case 'C':		/* comments */
 	  pass_comments = 1;
+	  break;
+
+	case 'H':		/* threads */
+	  bfthreads = 1;
 	  break;
 
 	case 'm':		/* memory size */
@@ -182,6 +188,14 @@ int main (int argc, char **argv)
 	default:
 	  abort ();
 	}
+    }
+
+  /* Set up for threads */
+  if (bfthreads)
+    {
+      bfthreads = argc - optind;
+      bfstr_htype = bfstr_type;
+      bfstr_type = "bf_hcell";
     }
 
   /* No input files */
@@ -267,12 +281,25 @@ int main (int argc, char **argv)
 		   progname, infile);
 	  exit (EXIT_FAILURE);
 	}
+
+      /* If threaded, start producing code */
+      if (bfthreads)
+	{
+	  bfparse (0);
+	  if (optimize)
+	    im_opt (head);
+	  im_codegen (head);
+	  head = NULL;
+	}
     }
-  bfparse (0);
-  if (optimize)
-    im_opt (head);
-  im_codegen (head);
-  print_tail ();
+  if (!bfthreads)
+    {
+      bfparse (0);
+      if (optimize)
+	im_opt (head);
+      im_codegen (head);
+      print_tail ();
+    }
 
   /* Close output file */
   if (!strcmp (outfile, "-") || compile_output)
@@ -291,7 +318,7 @@ int main (int argc, char **argv)
       if (pid == 0)
 	{
 	  /* Build argv */
-	  char *fargv[10];
+	  char *fargv[15];
 	  fargv[0] = "gcc";
 	  fargv[1] = "-x";
 	  fargv[2] = "c";
@@ -308,6 +335,13 @@ int main (int argc, char **argv)
 	  if (bfbignum)
 	    {
 	      fargv[i] = "-lgmp";
+	      i++;
+	    }
+
+	  /* Link against pthreads */
+	  if (bfthreads)
+	    {
+	      fargv[i] = "-lpthread";
 	      i++;
 	    }
 
