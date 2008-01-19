@@ -51,6 +51,7 @@ void print_usage (int exit_stat)
   printf ("  -c, --compile         Send output to C compiler\n");
 #endif
   printf ("  -n, --no-optimize     Don't perform brainfuck optimization\n");
+  printf ("  -t, --cell-type       Cell type (see below)\n");
   printf ("  -V, --version         Print program version\n");
   printf ("  -h, --help            Print this help information\n");
   printf ("\nCell Types:\n\n");
@@ -58,7 +59,7 @@ void print_usage (int exit_stat)
   printf ("  short        Unsigned short  (probably 0 to 65536)\n");
   printf ("  int          Unsigned int    (probably 0 to 4294967296)\n");
 #if EN_BIGNUM
-  printf ("  bignum        Multi-precision "
+  printf ("  bignum       Multi-precision "
 	  "(unlimited range, no wrapping, requires gmp)\n");
 #endif
 
