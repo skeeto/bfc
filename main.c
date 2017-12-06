@@ -24,7 +24,7 @@ char *midfile;
 void print_version ()
 {
   printf ("%s, version %s\n", PACKAGE_NAME, PACKAGE_VERSION);
-  printf ("Copyright (C) 2007 Chris Wellons\n");
+  printf ("Copyright (C) 2007 Chris Wellons, Chris Szewczyk\n");
   printf ("This is free software; see the source code for "
 	  "copying conditions.\n");
   printf ("There is ABSOLUTELY NO WARRANTY; not even for "
@@ -55,9 +55,9 @@ void print_usage (int exit_stat)
   printf ("  -V, --version         Print program version\n");
   printf ("  -h, --help            Print this help information\n");
   printf ("\nCell Types:\n\n");
-  printf ("  char         Unsigned char   (0 to 256)\n");
-  printf ("  short        Unsigned short  (probably 0 to 65536)\n");
-  printf ("  int          Unsigned int    (probably 0 to 4294967296)\n");
+  printf ("  char         Unsigned char   (commonly 0 to 256)\n");
+  printf ("  short        Unsigned short  (commonly 0 to 65536)\n");
+  printf ("  int          Unsigned int    (commonly 0 to 4294967296)\n");
 #if EN_BIGNUM
   printf ("  bignum       Multi-precision "
 	  "(unlimited range, no wrapping, requires gmp)\n");
