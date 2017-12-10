@@ -24,12 +24,6 @@ char *midfile;
 void print_version ()
 {
   printf ("%s, version %s\n", PACKAGE_NAME, PACKAGE_VERSION);
-  printf ("Copyright (C) 2007 Chris Wellons\n");
-  printf ("This is free software; see the source code for "
-	  "copying conditions.\n");
-  printf ("There is ABSOLUTELY NO WARRANTY; not even for "
-	  "MERCHANTIBILITY or\n");
-  printf ("FITNESS FOR A PARTICULAR PURPOSE.\n");
 }
 
 void print_usage (int exit_stat)
